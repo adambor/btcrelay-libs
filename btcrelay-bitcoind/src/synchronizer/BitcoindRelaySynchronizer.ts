@@ -36,29 +36,17 @@ export class BtcRelaySynchronizer<V extends BtcStoredHeader<any>, T> implements 
             computedCommitedHeaders: null
         };
 
-        let btcRelayTipBlockHash: string;
-
-        let spvTipBlockHeader: BitcoindBlock;
-        try {
-            console.log("[BtcRelaySynchronizer]: Stored tip hash: ", tipData.blockhash);
-            const btcBlockHeader = await this.bitcoinRpc.getBlockHeader(tipData.blockhash);
-            if(btcBlockHeader.confirmations<=0) throw new Error("Block not in main chain");
-            cacheData.lastStoredHeader = await this.btcRelay.retrieveLogByCommitHash(tipData.commitHash, tipData.blockhash);
-            spvTipBlockHeader = btcBlockHeader;
-            btcRelayTipBlockHash = btcBlockHeader.hash;
-        } catch (e) {
-            console.error(e);
-            //Block not found, therefore relay tip is probably in a fork
-            const {resultStoredHeader, resultBitcoinHeader} = await this.btcRelay.retrieveLatestKnownBlockLog();
-            cacheData.lastStoredHeader = resultStoredHeader;
+        const {resultStoredHeader, resultBitcoinHeader} = await this.btcRelay.retrieveLatestKnownBlockLog();
+        cacheData.lastStoredHeader = resultStoredHeader;
+        if(resultStoredHeader.getBlockheight()<tipData.blockheight) {
             cacheData.forkId = -1; //Indicate that we will be submitting blocks to fork
-            spvTipBlockHeader = resultBitcoinHeader;
-            btcRelayTipBlockHash = resultBitcoinHeader.hash;
         }
+        let spvTipBlockHeader: BitcoindBlock = resultBitcoinHeader;
+        const btcRelayTipBlockHash: string = resultBitcoinHeader.hash;
 
         console.log("[BtcRelaySynchronizer]: Retrieved stored header with commitment: ", cacheData.lastStoredHeader);
 
-        console.log("[BtcRelaySynchronizer]: SPV tip hash: ", tipData.blockhash);
+        console.log("[BtcRelaySynchronizer]: SPV tip commit hash: ", tipData.commitHash);
 
         console.log("[BtcRelaySynchronizer]: SPV tip header: ", spvTipBlockHeader);
 

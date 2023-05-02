@@ -204,9 +204,7 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
 
     }
 
-    async init(
-        tipBlockHash: string
-    ) {
+    async init() {
         try {
             await fs.mkdir(this.rootDir);
         } catch (e) {}
