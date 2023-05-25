@@ -85,6 +85,22 @@ export class BitcoindRpc implements BitcoinRpc<BitcoindBlock> {
         });
     }
 
+    async getTipHeight(): Promise<number> {
+
+        const retrievedInfo: any = await new Promise((resolve, reject) => {
+            this.rpc.getBlockchainInfo((err, info) => {
+                if(err) {
+                    reject(err);
+                    return;
+                }
+                resolve(info.result);
+            });
+        });
+
+        return retrievedInfo.blocks;
+
+    }
+
     async getBlockHeader(blockhash: string): Promise<BitcoindBlock> {
         const retrievedHeader = await new Promise<BitcoindBlockType>((resolve, reject) => {
             this.rpc.getBlockHeader(blockhash, true, (err, info) => {
