@@ -86,4 +86,8 @@ export class BitcoindBlock implements BtcBlock {
         return this.version;
     }
 
+    getChainWork(): Buffer {
+        return Buffer.from(this.chainwork.padStart(64, "0"), "hex");
+    }
+
 }
