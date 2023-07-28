@@ -158,7 +158,7 @@ export class BitcoindRpc implements BitcoinRpc<BitcoindBlock> {
         const resultHex = btcTx.toHex();
 
         retrievedTx.vout.forEach(e => {
-            e.value = parseInt(e.value.toFixed(8).replace(new RegExp(".", 'g'), ""));
+            e.value = parseInt(e.value.toFixed(8).replace(new RegExp("\\.", 'g'), ""));
         });
 
         return {
@@ -198,7 +198,7 @@ export class BitcoindRpc implements BitcoinRpc<BitcoindBlock> {
 
         block.tx.forEach(tx => {
             tx.vout.forEach(vout => {
-                vout.value = parseInt(vout.value.toFixed(8).replace(new RegExp(".", 'g'), ""));
+                vout.value = parseInt(vout.value.toFixed(8).replace(new RegExp("\\.", 'g'), ""));
             });
         });
 
