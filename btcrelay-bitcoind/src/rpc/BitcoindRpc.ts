@@ -3,7 +3,6 @@ import {BTCMerkleTree} from "./BTCMerkleTree";
 import {BitcoinRpc, BtcBlockWithTxs, BtcTx} from "crosslightning-base";
 import * as bitcoin from "bitcoinjs-lib";
 import * as RpcClient from "bitcoind-rpc";
-import * as BN from "bn.js";
 
 export type BitcoindVout = {
     value: number,
@@ -159,8 +158,7 @@ export class BitcoindRpc implements BitcoinRpc<BitcoindBlock> {
         const resultHex = btcTx.toHex();
 
         retrievedTx.vout.forEach(e => {
-            const bnVal = new BN(e.value).mul(new BN(100000000));
-            e.value = bnVal.toNumber();
+            e.value = parseInt(e.value.toFixed(8).replace(new RegExp(".", 'g'), ""));
         });
 
         return {
@@ -200,7 +198,7 @@ export class BitcoindRpc implements BitcoinRpc<BitcoindBlock> {
 
         block.tx.forEach(tx => {
             tx.vout.forEach(vout => {
-                vout.value = new BN(vout.value).mul(new BN(100000000)).toNumber();
+                vout.value = parseInt(vout.value.toFixed(8).replace(new RegExp(".", 'g'), ""));
             });
         });
 
