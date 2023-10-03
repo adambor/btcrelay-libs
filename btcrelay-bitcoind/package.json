@@ -22,11 +22,13 @@
   "author": "adambor",
   "license": "ISC",
   "dependencies": {
-    "@types/node": "^18.15.11",
     "bitcoind-rpc": "^0.9.1",
     "bitcoinjs-lib": "^5.2.0",
     "bn.js": "^5.2.1",
-    "crosslightning-base": "^4.0.8",
+    "crosslightning-base": "^4.0.8"
+  },
+  "devDependencies": {
+    "@types/node": "^18.18.3",
     "typescript": "^4.9.5"
   }
 }
