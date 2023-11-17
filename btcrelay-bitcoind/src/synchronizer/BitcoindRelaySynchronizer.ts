@@ -56,10 +56,19 @@ export class BtcRelaySynchronizer<V extends BtcStoredHeader<any>, T> implements 
         };
         const computedHeaderMap: {[blockheight: number]: V} = {};
 
-        const saveHeaders = async (headerCache: BitcoindBlock[]) => {
+        const saveHeaders = async (headerCache: BitcoindBlock[], final: boolean) => {
             console.log("[BtcRelaySynchronizer]: Header cache: ", headerCache.map(e => e.hash));
             if(cacheData.forkId===-1) {
-                cacheData = await this.btcRelay.saveNewForkHeaders(headerCache, cacheData.lastStoredHeader, tipData.chainWork)
+                if(
+                    final &&
+                    this.btcRelay.maxShortForkHeadersPerTx!=null &&
+                    this.btcRelay.maxShortForkHeadersPerTx>=headerCache.length &&
+                    this.btcRelay.saveShortForkHeaders!=null
+                ) {
+                    cacheData = await this.btcRelay.saveShortForkHeaders(headerCache, cacheData.lastStoredHeader, tipData.chainWork);
+                } else {
+                    cacheData = await this.btcRelay.saveNewForkHeaders(headerCache, cacheData.lastStoredHeader, tipData.chainWork);
+                }
             } else if(cacheData.forkId===0) {
                 cacheData = await this.btcRelay.saveMainHeaders(headerCache, cacheData.lastStoredHeader);
             } else {
@@ -87,7 +96,7 @@ export class BtcRelaySynchronizer<V extends BtcStoredHeader<any>, T> implements 
                 headerCache.length>=this.btcRelay.maxHeadersPerTx :
                 headerCache.length>=this.btcRelay.maxForkHeadersPerTx) {
 
-                await saveHeaders(headerCache);
+                await saveHeaders(headerCache, false);
 
                 headerCache = [];
             }
@@ -100,7 +109,7 @@ export class BtcRelaySynchronizer<V extends BtcStoredHeader<any>, T> implements 
         }
 
         if(headerCache.length>0) {
-            await saveHeaders(headerCache);
+            await saveHeaders(headerCache, true);
         }
 
         return {
