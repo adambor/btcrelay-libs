@@ -1,6 +1,6 @@
 {
   "name": "btcrelay-watchtower",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "description": "Watchtower chain agnostic implementation",
   "main": "./dist/index.js",
   "types:": "./dist/index.d.ts",
@@ -23,7 +23,7 @@
   "license": "ISC",
   "dependencies": {
     "bn.js": "^5.2.1",
-    "crosslightning-base": "^4.1.0"
+    "crosslightning-base": "^4.2.0"
   },
   "devDependencies": {
     "@types/node": "^18.18.3",
