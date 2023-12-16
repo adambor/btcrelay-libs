@@ -19,7 +19,8 @@ export class BtcRelaySynchronizer<V extends BtcStoredHeader<any>, T> implements 
         computedHeaderMap: {[blockheight: number]: V},
         blockHeaderMap: {[blockheight: number]: BitcoindBlock},
         btcRelayTipBlockHash: string,
-        latestBlockHeader: BitcoindBlock
+        latestBlockHeader: BitcoindBlock,
+        startForkId: number
     }> {
 
         const tipData = await this.btcRelay.getTipData();
@@ -35,6 +36,8 @@ export class BtcRelaySynchronizer<V extends BtcStoredHeader<any>, T> implements 
             tx: null,
             computedCommitedHeaders: null
         };
+
+        let startForkId = null;
 
         const {resultStoredHeader, resultBitcoinHeader} = await this.btcRelay.retrieveLatestKnownBlockLog();
         cacheData.lastStoredHeader = resultStoredHeader;
@@ -74,6 +77,7 @@ export class BtcRelaySynchronizer<V extends BtcStoredHeader<any>, T> implements 
             } else {
                 cacheData = await this.btcRelay.saveForkHeaders(headerCache, cacheData.lastStoredHeader, cacheData.forkId, tipData.chainWork)
             }
+            if(cacheData.forkId!==-1 && cacheData.forkId!==0) startForkId = cacheData.forkId;
             txsList.push(cacheData.tx);
             for(let storedHeader of cacheData.computedCommitedHeaders) {
                 computedHeaderMap[storedHeader.getBlockheight()] = storedHeader;
@@ -119,7 +123,8 @@ export class BtcRelaySynchronizer<V extends BtcStoredHeader<any>, T> implements 
             computedHeaderMap,
             btcRelayTipBlockHash,
 
-            latestBlockHeader: spvTipBlockHeader
+            latestBlockHeader: spvTipBlockHeader,
+            startForkId
         };
 
     }
