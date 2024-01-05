@@ -141,12 +141,18 @@ export class BitcoindRpc implements BitcoinRpc<BitcoindBlock> {
         const retrievedTx = await new Promise<BitcoindTransaction>((resolve, reject) => {
             this.rpc.getRawTransaction(txId, 1, (err, info) => {
                 if(err) {
+                    if(err.code===-5) {
+                        resolve(null);
+                        return;
+                    }
                     reject(err);
                     return;
                 }
                 resolve(info.result);
             });
         });
+
+        if(retrievedTx==null) return null;
 
         //Strip witness data
         const btcTx = bitcoin.Transaction.fromHex(retrievedTx.hex);
