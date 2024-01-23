@@ -216,11 +216,11 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
         this.solEvents.registerListener(async (obj: SwapEvent<T>[]) => {
             for(let event of obj) {
                 if(event instanceof InitializeEvent) {
-                    const swapData = event.swapData;
-
-                    if(swapData.getType()!==ChainSwapType.CHAIN) {
+                    if(event.swapType!==ChainSwapType.CHAIN) {
                         continue;
                     }
+
+                    const swapData = await event.swapData();
 
                     const txoHash: Buffer = Buffer.from(swapData.getTxoHash(), "hex");
                     const hash: Buffer = Buffer.from(swapData.getHash(), "hex");
@@ -232,17 +232,17 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
                     //Check with pruned tx map
                     const data = this.prunedTxoMap.getTxoObject(txoHashHex);
 
-                    const isCommited = await this.swapContract.isCommited(swapData);
-                    if(isCommited) {
-                        const savedSwap: SavedSwap<T> = new SavedSwap<T>(txoHash, hash, swapData.getConfirmations(), event.swapData);
+                    const savedSwap: SavedSwap<T> = new SavedSwap<T>(txoHash, hash, swapData.getConfirmations(), swapData);
 
-                        console.log("[Watchtower]: Adding new swap to watchlist: ", savedSwap);
+                    console.log("[Watchtower]: Adding new swap to watchlist: ", savedSwap);
 
-                        await this.save(savedSwap);
-                        if(data!=null) {
-                            const requiredBlockHeight = data.height+savedSwap.confirmations-1;
-                            if(requiredBlockHeight<=this.prunedTxoMap.tipHeight) {
-                                //Claimable
+                    await this.save(savedSwap);
+                    if(data!=null) {
+                        const requiredBlockHeight = data.height+savedSwap.confirmations-1;
+                        if(requiredBlockHeight<=this.prunedTxoMap.tipHeight) {
+                            //Claimable
+                            const isCommited = await this.swapContract.isCommited(swapData);
+                            if(isCommited) {
                                 await this.claim(txoHash, savedSwap, data.txId, data.vout, data.height);
                             }
                         }
