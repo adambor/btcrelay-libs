@@ -1,6 +1,6 @@
 {
   "name": "btcrelay-bitcoind",
-  "version": "5.0.2",
+  "version": "5.0.3",
   "description": "Connector and synchronizer using bitcoind for bitcoin relay",
   "main": "./dist/index.js",
   "types:": "./dist/index.d.ts",
@@ -26,7 +26,7 @@
     "bitcoind-rpc": "0.9.1",
     "bitcoinjs-lib": "6.1.5",
     "bn.js": "5.2.1",
-    "crosslightning-base": "6.0.0"
+    "crosslightning-base": "6.0.1"
   },
   "devDependencies": {
     "@types/node": "18.18.3",

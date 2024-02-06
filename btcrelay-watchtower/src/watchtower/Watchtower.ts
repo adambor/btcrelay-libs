@@ -13,7 +13,7 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
     btcRelay: BtcRelay<B, TX, any>;
     btcRelaySynchronizer: RelaySynchronizer<B, TX, BtcBlock>;
 
-    swapContract: SwapContract<T, TX>;
+    swapContract: SwapContract<T, TX, any, any>;
     solEvents: ChainEvents<T>;
     bitcoinRpc: BitcoinRpc<any>;
 
@@ -27,7 +27,7 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
         btcRelay: BtcRelay<B, TX, any>,
         btcRelaySynchronizer: RelaySynchronizer<B, TX, BtcBlock>,
         solEvents: ChainEvents<T>,
-        swapContract: SwapContract<T, TX>,
+        swapContract: SwapContract<T, TX, any, any>,
         bitcoinRpc: BitcoinRpc<any>,
         pruningFactor?: number
     ) {
