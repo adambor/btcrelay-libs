@@ -1,6 +1,6 @@
 {
   "name": "btcrelay-bitcoind",
-  "version": "5.0.4",
+  "version": "5.0.5",
   "description": "Connector and synchronizer using bitcoind for bitcoin relay",
   "main": "./dist/index.js",
   "types:": "./dist/index.d.ts",
