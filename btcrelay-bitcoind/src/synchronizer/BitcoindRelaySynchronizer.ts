@@ -81,7 +81,7 @@ export class BtcRelaySynchronizer<V extends BtcStoredHeader<any>, T> implements 
                 cacheData = await this.btcRelay.saveMainHeaders(headerCache, cacheData.lastStoredHeader, mainFee);
             } else {
                 if(forkFee==null) forkFee = await this.btcRelay.getForkFeeRate(cacheData.forkId);
-                cacheData = await this.btcRelay.saveForkHeaders(headerCache, cacheData.lastStoredHeader, cacheData.forkId, tipData.chainWork);
+                cacheData = await this.btcRelay.saveForkHeaders(headerCache, cacheData.lastStoredHeader, cacheData.forkId, tipData.chainWork, forkFee);
             }
             if(cacheData.forkId!==-1 && cacheData.forkId!==0) startForkId = cacheData.forkId;
             txsList.push(cacheData.tx);
