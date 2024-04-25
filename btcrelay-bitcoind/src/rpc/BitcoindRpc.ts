@@ -1,6 +1,6 @@
 import {BitcoindBlock, BitcoindBlockType} from "./BitcoindBlock";
 import {BTCMerkleTree} from "./BTCMerkleTree";
-import {BitcoinRpc, BtcBlockWithTxs, BtcTx} from "crosslightning-base";
+import {BitcoinRpc, BtcBlockWithTxs, BtcSyncInfo, BtcTx} from "crosslightning-base";
 import * as bitcoin from "bitcoinjs-lib";
 import * as RpcClient from "bitcoind-rpc";
 
@@ -65,6 +65,25 @@ type BitcoindRawBlock = {
     nextblockhash: string
 }
 
+type BitcoindBlockchainInfo = {
+    chain : string,
+    blocks : number,
+    headers : number,
+    bestblockhash : string,
+    difficulty : number,
+    time : number,
+    mediantime : number,
+    verificationprogress : number,
+    initialblockdownload : boolean,
+    chainwork : string,
+    size_on_disk : number,
+    pruned : boolean,
+    pruneheight : number,
+    automatic_pruning : boolean,
+    prune_target_size : number,
+    warnings : string
+}
+
 export class BitcoindRpc implements BitcoinRpc<BitcoindBlock> {
 
     rpc: any;
@@ -87,7 +106,7 @@ export class BitcoindRpc implements BitcoinRpc<BitcoindBlock> {
 
     async getTipHeight(): Promise<number> {
 
-        const retrievedInfo: any = await new Promise((resolve, reject) => {
+        const retrievedInfo = await new Promise<BitcoindBlockchainInfo>((resolve, reject) => {
             this.rpc.getBlockchainInfo((err, info) => {
                 if(err) {
                     reject(err);
@@ -229,6 +248,26 @@ export class BitcoindRpc implements BitcoinRpc<BitcoindBlock> {
             })
         };
 
+    }
+
+    async getSyncInfo(): Promise<BtcSyncInfo> {
+        const blockchainInfo = await new Promise<BitcoindBlockchainInfo>((resolve, reject) => {
+            this.rpc.getBlockchainInfo((err, info) => {
+                if(err) {
+                    reject(err);
+                    return;
+                }
+                resolve(info.result);
+            });
+        });
+
+        return {
+            ibd: blockchainInfo.initialblockdownload,
+            verificationProgress: blockchainInfo.verificationprogress,
+            headers: blockchainInfo.headers,
+            blocks: blockchainInfo.blocks,
+            _: blockchainInfo
+        } as any;
     }
 
 }
