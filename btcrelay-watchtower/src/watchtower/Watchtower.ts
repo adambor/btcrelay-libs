@@ -7,20 +7,22 @@ import {BtcStoredHeader, InitializeEvent, SwapEvent, ChainEvents, SwapContract, 
 
 export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> {
 
-    hashMap: Map<string, SavedSwap<T>> = new Map<string, SavedSwap<T>>();
-    escrowMap: Map<string, SavedSwap<T>> = new Map<string, SavedSwap<T>>();
+    readonly hashMap: Map<string, SavedSwap<T>> = new Map<string, SavedSwap<T>>();
+    readonly escrowMap: Map<string, SavedSwap<T>> = new Map<string, SavedSwap<T>>();
 
-    btcRelay: BtcRelay<B, TX, any>;
-    btcRelaySynchronizer: RelaySynchronizer<B, TX, BtcBlock>;
+    readonly btcRelay: BtcRelay<B, TX, any>;
+    readonly btcRelaySynchronizer: RelaySynchronizer<B, TX, BtcBlock>;
 
-    swapContract: SwapContract<T, TX, any, any>;
-    solEvents: ChainEvents<T>;
-    bitcoinRpc: BitcoinRpc<any>;
+    readonly swapContract: SwapContract<T, TX, any, any>;
+    readonly solEvents: ChainEvents<T>;
+    readonly bitcoinRpc: BitcoinRpc<any>;
 
-    prunedTxoMap: PrunedTxoMap;
+    readonly prunedTxoMap: PrunedTxoMap;
 
-    readonly dirName;
-    readonly rootDir;
+    readonly dirName: string;
+    readonly rootDir: string;
+
+    readonly shouldClaimCbk: (swap: SavedSwap<T>) => Promise<{initAta: boolean, feeRate: any}>;
 
     constructor(
         directory: string,
@@ -29,7 +31,8 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
         solEvents: ChainEvents<T>,
         swapContract: SwapContract<T, TX, any, any>,
         bitcoinRpc: BitcoinRpc<any>,
-        pruningFactor?: number
+        pruningFactor?: number,
+        shouldClaimCbk?: (swap: SavedSwap<T>) => Promise<{initAta: boolean, feeRate: any}>
     ) {
         this.rootDir = directory;
         this.dirName = directory+"/swaps";
@@ -39,6 +42,7 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
         this.swapContract = swapContract;
         this.bitcoinRpc = bitcoinRpc;
         this.prunedTxoMap = new PrunedTxoMap(directory+"/wt-height.txt", bitcoinRpc, pruningFactor);
+        this.shouldClaimCbk = shouldClaimCbk;
     }
 
     private async load() {
@@ -123,29 +127,15 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
         blockheight: number,
         computedCommitedHeaders?: {
             [height: number]: B
-        }
+        },
+        initAta?: boolean,
+        feeRate?: any
     ): Promise<TX[] | null> {
         const isCommited = await this.swapContract.isCommited(swap.swapData);
 
         if(!isCommited) return null;
 
         const tx = await this.bitcoinRpc.getTransaction(txId);
-        // const tx = await new Promise<BitcoindTransaction>((resolve, reject) => {
-        //     BtcRPC.getRawTransaction(txId, 1, (err, info) => {
-        //         if(err) {
-        //             reject(err);
-        //             return;
-        //         }
-        //         resolve(info.result);
-        //     });
-        // });
-        //
-        // //Strip witness data
-        // const btcTx = bitcoin.Transaction.fromHex(tx.hex);
-        // for(let txIn of btcTx.ins) {
-        //     txIn.witness = [];
-        // }
-        // tx.hex = btcTx.toHex();
 
         //Re-check txoHash
         const vout = tx.outs[voutN];
@@ -162,9 +152,12 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
 
         let txs;
         try {
-            txs = await this.swapContract.txsClaimWithTxData(swap.swapData, blockheight, tx, voutN, storedHeader, null, false);
+            txs = await this.swapContract.txsClaimWithTxData(swap.swapData, blockheight, tx, voutN, storedHeader, null, initAta==null ? false : initAta, feeRate);
         } catch (e) {
-            if(e instanceof SwapDataVerificationError) return null;
+            if(e instanceof SwapDataVerificationError) {
+                console.error(e);
+                return null;
+            }
             throw e;
         }
         return txs;
@@ -343,7 +336,17 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
                     const unlock = savedSwap.lock(120);
                     if(unlock==null) continue;
 
-                    const claimTxs = await this.createClaimTxs(Buffer.from(txoHash, "hex"), savedSwap, data.txId, data.vout, data.height, computedHeaderMap);
+                    //Check claimer's bounty and create ATA if the claimer bounty covers the costs of it!
+
+                    let claimTxs: TX[];
+                    if(this.shouldClaimCbk!=null) {
+                        const feeData = await this.shouldClaimCbk(savedSwap);
+                        if(feeData==null) continue;
+                        claimTxs = await this.createClaimTxs(Buffer.from(txoHash, "hex"), savedSwap, data.txId, data.vout, data.height, computedHeaderMap, feeData.initAta, feeData.feeRate);
+                    } else {
+                        claimTxs = await this.createClaimTxs(Buffer.from(txoHash, "hex"), savedSwap, data.txId, data.vout, data.height, computedHeaderMap);
+                    }
+
                     if(claimTxs==null)  {
                         await this.remove(savedSwap.txoHash);
                     } else {
@@ -374,7 +377,17 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
                         const unlock = savedSwap.lock(120);
                         if(unlock==null) continue;
 
-                        const claimTxs = await this.createClaimTxs(Buffer.from(txoHash, "hex"), savedSwap, data.txId, data.vout, data.height, computedHeaderMap);
+                        //Check claimer's bounty and create ATA if the claimer bounty covers the costs of it!
+
+                        let claimTxs: TX[];
+                        if(this.shouldClaimCbk!=null) {
+                            const feeData = await this.shouldClaimCbk(savedSwap);
+                            if(feeData==null) continue;
+                            claimTxs = await this.createClaimTxs(Buffer.from(txoHash, "hex"), savedSwap, data.txId, data.vout, data.height, computedHeaderMap, feeData.initAta, feeData.feeRate);
+                        } else {
+                            claimTxs = await this.createClaimTxs(Buffer.from(txoHash, "hex"), savedSwap, data.txId, data.vout, data.height, computedHeaderMap);
+                        }
+
                         if(claimTxs==null) {
                             await this.remove(savedSwap.txoHash);
                         } else {
