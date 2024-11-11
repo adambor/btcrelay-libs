@@ -13,7 +13,7 @@ export class BtcRelaySynchronizer<V extends BtcStoredHeader<any>, T> implements 
         this.bitcoinRpc = bitcoinRpc;
     }
 
-    async syncToLatestTxs(): Promise<{
+    async syncToLatestTxs(signer: string): Promise<{
         txs: T[]
         targetCommitedHeader: V,
         computedHeaderMap: {[blockheight: number]: V},
@@ -22,7 +22,6 @@ export class BtcRelaySynchronizer<V extends BtcStoredHeader<any>, T> implements 
         latestBlockHeader: BitcoindBlock,
         startForkId: number
     }> {
-
         const tipData = await this.btcRelay.getTipData();
 
         let cacheData: {
@@ -65,23 +64,23 @@ export class BtcRelaySynchronizer<V extends BtcStoredHeader<any>, T> implements 
         const saveHeaders = async (headerCache: BitcoindBlock[], final: boolean) => {
             console.log("[BtcRelaySynchronizer]: Header cache: ", headerCache.map(e => e.hash));
             if(cacheData.forkId===-1) {
-                if(mainFee==null) mainFee = await this.btcRelay.getMainFeeRate();
+                if(mainFee==null) mainFee = await this.btcRelay.getMainFeeRate(signer);
                 if(
                     final &&
                     this.btcRelay.maxShortForkHeadersPerTx!=null &&
                     this.btcRelay.maxShortForkHeadersPerTx>=headerCache.length &&
                     this.btcRelay.saveShortForkHeaders!=null
                 ) {
-                    cacheData = await this.btcRelay.saveShortForkHeaders(headerCache, cacheData.lastStoredHeader, tipData.chainWork, mainFee);
+                    cacheData = await this.btcRelay.saveShortForkHeaders(signer, headerCache, cacheData.lastStoredHeader, tipData.chainWork, mainFee);
                 } else {
-                    cacheData = await this.btcRelay.saveNewForkHeaders(headerCache, cacheData.lastStoredHeader, tipData.chainWork, mainFee);
+                    cacheData = await this.btcRelay.saveNewForkHeaders(signer, headerCache, cacheData.lastStoredHeader, tipData.chainWork, mainFee);
                 }
             } else if(cacheData.forkId===0) {
-                if(mainFee==null) mainFee = await this.btcRelay.getMainFeeRate();
-                cacheData = await this.btcRelay.saveMainHeaders(headerCache, cacheData.lastStoredHeader, mainFee);
+                if(mainFee==null) mainFee = await this.btcRelay.getMainFeeRate(signer);
+                cacheData = await this.btcRelay.saveMainHeaders(signer, headerCache, cacheData.lastStoredHeader, mainFee);
             } else {
-                if(forkFee==null) forkFee = await this.btcRelay.getForkFeeRate(cacheData.forkId);
-                cacheData = await this.btcRelay.saveForkHeaders(headerCache, cacheData.lastStoredHeader, cacheData.forkId, tipData.chainWork, forkFee);
+                if(forkFee==null) forkFee = await this.btcRelay.getForkFeeRate(signer, cacheData.forkId);
+                cacheData = await this.btcRelay.saveForkHeaders(signer, headerCache, cacheData.lastStoredHeader, cacheData.forkId, tipData.chainWork, forkFee);
             }
             if(cacheData.forkId!==-1 && cacheData.forkId!==0) startForkId = cacheData.forkId;
             txsList.push(cacheData.tx);

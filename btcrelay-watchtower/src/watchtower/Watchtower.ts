@@ -1,20 +1,28 @@
 import {PrunedTxoMap} from "./PrunedTxoMap";
 import * as fs from "fs/promises";
 import {SavedSwap} from "./SavedSwap";
-import {BtcStoredHeader, InitializeEvent, SwapEvent, ChainEvents, SwapContract, SwapData, ChainSwapType, BitcoinRpc, BtcRelay,
-    SwapDataVerificationError, BtcBlock, RelaySynchronizer} from "crosslightning-base";
+import {
+    BtcStoredHeader,
+    InitializeEvent,
+    SwapEvent,
+    ChainSwapType,
+    BitcoinRpc,
+    SwapDataVerificationError,
+    ChainType
+} from "crosslightning-base";
 
 
-export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> {
+export class Watchtower<T extends ChainType, B extends BtcStoredHeader<any>> {
 
     readonly hashMap: Map<string, SavedSwap<T>> = new Map<string, SavedSwap<T>>();
     readonly escrowMap: Map<string, SavedSwap<T>> = new Map<string, SavedSwap<T>>();
 
-    readonly btcRelay: BtcRelay<B, TX, any>;
-    readonly btcRelaySynchronizer: RelaySynchronizer<B, TX, BtcBlock>;
+    readonly btcRelay: T["BtcRelay"];
 
-    readonly swapContract: SwapContract<T, TX, any, any>;
-    readonly solEvents: ChainEvents<T>;
+    readonly swapContract: T["Contract"];
+    readonly solEvents: T["Events"];
+    readonly signer: T["Signer"];
+
     readonly bitcoinRpc: BitcoinRpc<any>;
 
     readonly prunedTxoMap: PrunedTxoMap;
@@ -26,10 +34,10 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
 
     constructor(
         directory: string,
-        btcRelay: BtcRelay<B, TX, any>,
-        btcRelaySynchronizer: RelaySynchronizer<B, TX, BtcBlock>,
-        solEvents: ChainEvents<T>,
-        swapContract: SwapContract<T, TX, any, any>,
+        btcRelay: T["BtcRelay"],
+        solEvents: T["Events"],
+        swapContract: T["Contract"],
+        signer: T["Signer"],
         bitcoinRpc: BitcoinRpc<any>,
         pruningFactor?: number,
         shouldClaimCbk?: (swap: SavedSwap<T>) => Promise<{initAta: boolean, feeRate: any}>
@@ -37,9 +45,9 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
         this.rootDir = directory;
         this.dirName = directory+"/swaps";
         this.btcRelay = btcRelay;
-        this.btcRelaySynchronizer = btcRelaySynchronizer;
         this.solEvents = solEvents;
         this.swapContract = swapContract;
+        this.signer = signer;
         this.bitcoinRpc = bitcoinRpc;
         this.prunedTxoMap = new PrunedTxoMap(directory+"/wt-height.txt", bitcoinRpc, pruningFactor);
         this.shouldClaimCbk = shouldClaimCbk;
@@ -130,7 +138,7 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
         },
         initAta?: boolean,
         feeRate?: any
-    ): Promise<TX[] | null> {
+    ): Promise<T["TX"][] | null> {
         const isCommited = await this.swapContract.isCommited(swap.swapData);
 
         if(!isCommited) {
@@ -157,7 +165,7 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
 
         let txs;
         try {
-            txs = await this.swapContract.txsClaimWithTxData(swap.swapData, blockheight, tx, voutN, storedHeader, null, initAta==null ? false : initAta, feeRate);
+            txs = await this.swapContract.txsClaimWithTxData(this.signer, swap.swapData, blockheight, tx, voutN, storedHeader, null, initAta==null ? false : initAta, feeRate);
         } catch (e) {
             if(e instanceof SwapDataVerificationError) {
                 console.log("[Watchtower.createClaimTxs] Not claiming swap txoHash: "+txoHash.toString("hex")+" due to SwapDataVerificationError!");
@@ -192,7 +200,10 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
             }
 
             try {
-                await this.swapContract.claimWithTxData(swap.swapData, blockheight, await this.bitcoinRpc.getTransaction(txId), vout, null, null, feeData?.initAta==null ? false : feeData.initAta, true, null, feeData?.feeRate);
+                await this.swapContract.claimWithTxData(this.signer, swap.swapData, blockheight, await this.bitcoinRpc.getTransaction(txId), vout, null, null, feeData?.initAta==null ? false : feeData.initAta, {
+                    waitForConfirmation: true,
+                    feeRate: feeData?.feeRate
+                });
             } catch (e) {
                 if(e instanceof SwapDataVerificationError) {
                     await this.remove(swap.txoHash);
@@ -224,7 +235,7 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
 
         console.log("[Watchtower.init]: Loaded!");
 
-        this.solEvents.registerListener(async (obj: SwapEvent<T>[]) => {
+        this.solEvents.registerListener(async (obj: SwapEvent<T["Data"]>[]) => {
             for(let event of obj) {
                 if(event instanceof InitializeEvent) {
                     if(event.swapType!==ChainSwapType.CHAIN) {
@@ -318,7 +329,7 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
         computedHeaderMap?: {[blockheight: number]: B}
     ): Promise<{
         [txcHash: string]: {
-            txs: TX[],
+            txs: T["TX"][],
             txId: string,
             vout: number,
             maturedAt: number,
@@ -329,7 +340,7 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
 
         const txs: {
             [txcHash: string]: {
-                txs: TX[],
+                txs: T["TX"][],
                 txId: string,
                 vout: number,
                 maturedAt: number,
@@ -356,7 +367,7 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
 
                     //Check claimer's bounty and create ATA if the claimer bounty covers the costs of it!
 
-                    let claimTxs: TX[];
+                    let claimTxs: T["TX"][];
                     if(this.shouldClaimCbk!=null) {
                         const feeData = await this.shouldClaimCbk(savedSwap);
                         if(feeData==null) {
@@ -402,7 +413,7 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
 
                         //Check claimer's bounty and create ATA if the claimer bounty covers the costs of it!
 
-                        let claimTxs: TX[];
+                        let claimTxs: T["TX"][];
                         if(this.shouldClaimCbk!=null) {
                             const feeData = await this.shouldClaimCbk(savedSwap);
                             if(feeData==null) {

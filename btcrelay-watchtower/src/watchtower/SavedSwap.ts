@@ -1,18 +1,18 @@
 import {Lockable} from "./Lockable";
-import {SwapData} from "crosslightning-base";
+import {ChainType, SwapData} from "crosslightning-base";
 
-export class SavedSwap<T extends SwapData> extends Lockable {
+export class SavedSwap<T extends ChainType> extends Lockable {
 
     readonly txoHash: Buffer;
     readonly hash: Buffer;
     readonly confirmations: number;
 
-    readonly swapData: T;
+    readonly swapData: T["Data"];
 
     constructor(data: any);
-    constructor(txoHash: Buffer, hash: Buffer, confirmations: number, swapData: T);
+    constructor(txoHash: Buffer, hash: Buffer, confirmations: number, swapData: T["Data"]);
 
-    constructor(txoHashOrObj: Buffer | any, hash?: Buffer, confirmations?: number, swapData?: T) {
+    constructor(txoHashOrObj: Buffer | any, hash?: Buffer, confirmations?: number, swapData?: T["Data"]) {
         super();
         if(hash!=null || confirmations!=null) {
             this.txoHash = txoHashOrObj;
