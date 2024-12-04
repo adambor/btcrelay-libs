@@ -2,7 +2,7 @@ import {BitcoindBlock, BitcoindBlockType} from "./BitcoindBlock";
 import {BTCMerkleTree} from "./BTCMerkleTree";
 import {BitcoinRpc, BtcBlockWithTxs, BtcSyncInfo, BtcTx} from "crosslightning-base";
 import * as bitcoin from "bitcoinjs-lib";
-import * as RpcClient from "bitcoind-rpc";
+import * as RpcClient from "@atomiqlabs/bitcoind-rpc";
 
 export type BitcoindVout = {
     value: number,
@@ -268,6 +268,34 @@ export class BitcoindRpc implements BitcoinRpc<BitcoindBlock> {
             blocks: blockchainInfo.blocks,
             _: blockchainInfo
         } as any;
+    }
+
+    async sendRawPackage(rawTxs: string[]): Promise<string[]> {
+        const result = await new Promise<{package_msg: string, tx_results: {[wtxid: string]: {txid: string}}}>((resolve, reject) => {
+            this.rpc.submitPackage(rawTxs, (err, info) => {
+                if(err) {
+                    reject(err);
+                    return;
+                }
+                resolve(info.result);
+            });
+        });
+        if(result.package_msg!=="success") throw new Error(
+            result.package_msg+": "+Object.keys(result["tx-results"]).map(wtxid => result["tx-results"][wtxid].txid+"=\""+result["tx-results"][wtxid].error+"\"").join(", ")
+        );
+        return Object.keys(result["tx-results"]).map(wtxid => result["tx-results"][wtxid].txid);
+    }
+
+    sendRawTransaction(rawTx: string): Promise<string> {
+        return new Promise<string>((resolve, reject) => {
+            this.rpc.sendRawTransaction(rawTx, (err, info) => {
+                if(err) {
+                    reject(err);
+                    return;
+                }
+                resolve(info.result);
+            });
+        });
     }
 
 }
