@@ -1,44 +1,56 @@
 import {PrunedTxoMap} from "./PrunedTxoMap";
 import * as fs from "fs/promises";
 import {SavedSwap} from "./SavedSwap";
-import {BtcStoredHeader, InitializeEvent, SwapEvent, ChainEvents, SwapContract, SwapData, ChainSwapType, BitcoinRpc, BtcRelay,
-    SwapDataVerificationError, BtcBlock, RelaySynchronizer} from "crosslightning-base";
+import {
+    BtcStoredHeader,
+    InitializeEvent,
+    SwapEvent,
+    ChainSwapType,
+    BitcoinRpc,
+    SwapDataVerificationError,
+    ChainType
+} from "crosslightning-base";
 
 
-export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> {
+export class Watchtower<T extends ChainType, B extends BtcStoredHeader<any>> {
 
-    hashMap: Map<string, SavedSwap<T>> = new Map<string, SavedSwap<T>>();
-    escrowMap: Map<string, SavedSwap<T>> = new Map<string, SavedSwap<T>>();
+    readonly hashMap: Map<string, SavedSwap<T>> = new Map<string, SavedSwap<T>>();
+    readonly escrowMap: Map<string, SavedSwap<T>> = new Map<string, SavedSwap<T>>();
 
-    btcRelay: BtcRelay<B, TX, any>;
-    btcRelaySynchronizer: RelaySynchronizer<B, TX, BtcBlock>;
+    readonly btcRelay: T["BtcRelay"];
 
-    swapContract: SwapContract<T, TX>;
-    solEvents: ChainEvents<T>;
-    bitcoinRpc: BitcoinRpc<any>;
+    readonly swapContract: T["Contract"];
+    readonly solEvents: T["Events"];
+    readonly signer: T["Signer"];
 
-    prunedTxoMap: PrunedTxoMap;
+    readonly bitcoinRpc: BitcoinRpc<any>;
 
-    readonly dirName;
-    readonly rootDir;
+    readonly prunedTxoMap: PrunedTxoMap;
+
+    readonly dirName: string;
+    readonly rootDir: string;
+
+    readonly shouldClaimCbk: (swap: SavedSwap<T>) => Promise<{initAta: boolean, feeRate: any}>;
 
     constructor(
         directory: string,
-        btcRelay: BtcRelay<B, TX, any>,
-        btcRelaySynchronizer: RelaySynchronizer<B, TX, BtcBlock>,
-        solEvents: ChainEvents<T>,
-        swapContract: SwapContract<T, TX>,
+        btcRelay: T["BtcRelay"],
+        solEvents: T["Events"],
+        swapContract: T["Contract"],
+        signer: T["Signer"],
         bitcoinRpc: BitcoinRpc<any>,
-        pruningFactor?: number
+        pruningFactor?: number,
+        shouldClaimCbk?: (swap: SavedSwap<T>) => Promise<{initAta: boolean, feeRate: any}>
     ) {
         this.rootDir = directory;
         this.dirName = directory+"/swaps";
         this.btcRelay = btcRelay;
-        this.btcRelaySynchronizer = btcRelaySynchronizer;
         this.solEvents = solEvents;
         this.swapContract = swapContract;
+        this.signer = signer;
         this.bitcoinRpc = bitcoinRpc;
         this.prunedTxoMap = new PrunedTxoMap(directory+"/wt-height.txt", bitcoinRpc, pruningFactor);
+        this.shouldClaimCbk = shouldClaimCbk;
     }
 
     private async load() {
@@ -123,29 +135,20 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
         blockheight: number,
         computedCommitedHeaders?: {
             [height: number]: B
-        }
-    ): Promise<TX[] | null> {
+        },
+        initAta?: boolean,
+        feeRate?: any
+    ): Promise<T["TX"][] | null> {
         const isCommited = await this.swapContract.isCommited(swap.swapData);
 
-        if(!isCommited) return null;
+        if(!isCommited) {
+            console.log("[Watchtower.createClaimTxs]: Not claiming swap txoHash: "+txoHash.toString("hex")+" due to it not being commited anymore!");
+            return null;
+        }
+
+        console.log("[Watchtower.createClaimTxs]: Claim swap txns: "+swap.hash.toString("hex")+" UTXO: ", txId+":"+voutN+"@"+blockheight);
 
         const tx = await this.bitcoinRpc.getTransaction(txId);
-        // const tx = await new Promise<BitcoindTransaction>((resolve, reject) => {
-        //     BtcRPC.getRawTransaction(txId, 1, (err, info) => {
-        //         if(err) {
-        //             reject(err);
-        //             return;
-        //         }
-        //         resolve(info.result);
-        //     });
-        // });
-        //
-        // //Strip witness data
-        // const btcTx = bitcoin.Transaction.fromHex(tx.hex);
-        // for(let txIn of btcTx.ins) {
-        //     txIn.witness = [];
-        // }
-        // tx.hex = btcTx.toHex();
 
         //Re-check txoHash
         const vout = tx.outs[voutN];
@@ -162,9 +165,13 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
 
         let txs;
         try {
-            txs = await this.swapContract.txsClaimWithTxData(swap.swapData, blockheight, tx, voutN, storedHeader, null, false);
+            txs = await this.swapContract.txsClaimWithTxData(this.signer, swap.swapData, blockheight, tx, voutN, storedHeader, null, initAta==null ? false : initAta, feeRate);
         } catch (e) {
-            if(e instanceof SwapDataVerificationError) return null;
+            if(e instanceof SwapDataVerificationError) {
+                console.log("[Watchtower.createClaimTxs] Not claiming swap txoHash: "+txoHash.toString("hex")+" due to SwapDataVerificationError!");
+                console.error(e);
+                return null;
+            }
             throw e;
         }
         return txs;
@@ -173,15 +180,30 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
 
     private async claim(txoHash: Buffer, swap: SavedSwap<T>, txId: string, vout: number, blockheight: number): Promise<boolean> {
 
-        console.log("[Watchtower]: Claim swap: "+swap.hash.toString("hex")+" UTXO: ", txId+":"+vout+"@"+blockheight);
+        console.log("[Watchtower.claim]: Claim swap: "+swap.hash.toString("hex")+" UTXO: ", txId+":"+vout+"@"+blockheight);
 
         try {
             const unlock = swap.lock(120);
 
             if(unlock==null) return false;
 
+            let feeData;
+            if(this.shouldClaimCbk!=null) {
+                feeData = await this.shouldClaimCbk(swap);
+                if(feeData==null) {
+                    console.log("[Watchtower.claim] Not claiming swap with txoHash: "+txoHash.toString("hex")+" due to negative response from shouldClaimCbk() callback!");
+                    return false;
+                }
+                console.log("[Watchtower.claim] Claiming swap with txoHash: "+txoHash+" initAta: "+feeData.initAta+" feeRate: "+feeData.feeRate);
+            } else {
+                console.log("[Watchtower.claim] Claiming swap with txoHash: "+txoHash);
+            }
+
             try {
-                await this.swapContract.claimWithTxData(swap.swapData, blockheight, await this.bitcoinRpc.getTransaction(txId), vout, null, null, false, true);
+                await this.swapContract.claimWithTxData(this.signer, swap.swapData, blockheight, await this.bitcoinRpc.getTransaction(txId), vout, null, null, feeData?.initAta==null ? false : feeData.initAta, {
+                    waitForConfirmation: true,
+                    feeRate: feeData?.feeRate
+                });
             } catch (e) {
                 if(e instanceof SwapDataVerificationError) {
                     await this.remove(swap.txoHash);
@@ -190,7 +212,7 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
                 return false;
             }
 
-            console.log("[Watchtower]: Claim swap: "+swap.hash.toString("hex")+" success!");
+            console.log("[Watchtower.claim]: Claim swap: "+swap.hash.toString("hex")+" success!");
 
             await this.remove(txoHash);
 
@@ -211,16 +233,16 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
 
         await this.load();
 
-        console.log("[Watchtower]: Loaded!");
+        console.log("[Watchtower.init]: Loaded!");
 
-        this.solEvents.registerListener(async (obj: SwapEvent<T>[]) => {
+        this.solEvents.registerListener(async (obj: SwapEvent<T["Data"]>[]) => {
             for(let event of obj) {
                 if(event instanceof InitializeEvent) {
-                    const swapData = event.swapData;
-
-                    if(swapData.getType()!==ChainSwapType.CHAIN) {
+                    if(event.swapType!==ChainSwapType.CHAIN) {
                         continue;
                     }
+
+                    const swapData = await event.swapData();
 
                     const txoHash: Buffer = Buffer.from(swapData.getTxoHash(), "hex");
                     const hash: Buffer = Buffer.from(swapData.getHash(), "hex");
@@ -232,17 +254,17 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
                     //Check with pruned tx map
                     const data = this.prunedTxoMap.getTxoObject(txoHashHex);
 
-                    const isCommited = await this.swapContract.isCommited(swapData);
-                    if(isCommited) {
-                        const savedSwap: SavedSwap<T> = new SavedSwap<T>(txoHash, hash, swapData.getConfirmations(), event.swapData);
+                    const savedSwap: SavedSwap<T> = new SavedSwap<T>(txoHash, hash, swapData.getConfirmations(), swapData);
 
-                        console.log("[Watchtower]: Adding new swap to watchlist: ", savedSwap);
+                    console.log("[Watchtower.chainEvents]: Adding new swap to watchlist: ", savedSwap);
 
-                        await this.save(savedSwap);
-                        if(data!=null) {
-                            const requiredBlockHeight = data.height+savedSwap.confirmations-1;
-                            if(requiredBlockHeight<=this.prunedTxoMap.tipHeight) {
-                                //Claimable
+                    await this.save(savedSwap);
+                    if(data!=null) {
+                        const requiredBlockHeight = data.height+savedSwap.confirmations-1;
+                        if(requiredBlockHeight<=this.prunedTxoMap.tipHeight) {
+                            //Claimable
+                            const isCommited = await this.swapContract.isCommited(swapData);
+                            if(isCommited) {
                                 await this.claim(txoHash, savedSwap, data.txId, data.vout, data.height);
                             }
                         }
@@ -261,7 +283,7 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
         //Sync to latest on Solana
         await this.solEvents.init();
 
-        console.log("[Watchtower]: Synchronized sol events");
+        console.log("[Watchtower.init]: Synchronized sol events");
 
         const resp = await this.btcRelay.retrieveLatestKnownBlockLog();
 
@@ -270,7 +292,7 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
 
         for(let txoHash of this.escrowMap.keys()) {
             const data = this.prunedTxoMap.getTxoObject(txoHash);
-            console.log("[Watchtower] Check "+txoHash+":", data);
+            console.log("[Watchtower.init] Check "+txoHash+":", data);
             if(data!=null) {
                 const savedSwap = this.escrowMap.get(txoHash);
                 const requiredBlockHeight = data.height+savedSwap.confirmations-1;
@@ -281,7 +303,7 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
             }
         }
 
-        console.log("[Watchtower]: Synced to last processed block");
+        console.log("[Watchtower.init]: Synced to last processed block");
 
         //Sync to the btc relay height
         const includedTxoHashes = await this.prunedTxoMap.syncToTipHash(resp.resultBitcoinHeader.hash, this.escrowMap);
@@ -299,7 +321,7 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
             }
         }
 
-        console.log("[Watchtower]: Synced to last btc relay block");
+        console.log("[Watchtower.init]: Synced to last btc relay block");
     }
 
     async syncToTipHash(
@@ -307,18 +329,18 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
         computedHeaderMap?: {[blockheight: number]: B}
     ): Promise<{
         [txcHash: string]: {
-            txs: TX[],
+            txs: T["TX"][],
             txId: string,
             vout: number,
             maturedAt: number,
             hash: Buffer
         }
     }> {
-        console.log("[Watchtower]: Syncing to tip hash: ", tipBlockHash);
+        console.log("[Watchtower.syncToTipHash]: Syncing to tip hash: ", tipBlockHash);
 
         const txs: {
             [txcHash: string]: {
-                txs: TX[],
+                txs: T["TX"][],
                 txId: string,
                 vout: number,
                 maturedAt: number,
@@ -343,7 +365,22 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
                     const unlock = savedSwap.lock(120);
                     if(unlock==null) continue;
 
-                    const claimTxs = await this.createClaimTxs(Buffer.from(txoHash, "hex"), savedSwap, data.txId, data.vout, data.height, computedHeaderMap);
+                    //Check claimer's bounty and create ATA if the claimer bounty covers the costs of it!
+
+                    let claimTxs: T["TX"][];
+                    if(this.shouldClaimCbk!=null) {
+                        const feeData = await this.shouldClaimCbk(savedSwap);
+                        if(feeData==null) {
+                            console.log("[Watchtower.syncToTipHash] Not claiming swap with txoHash: "+txoHash+" due to negative response from shouldClaimCbk() callback!");
+                            continue;
+                        }
+                        console.log("[Watchtower.syncToTipHash] Claiming swap with txoHash: "+txoHash+" initAta: "+feeData.initAta+" feeRate: "+feeData.feeRate);
+                        claimTxs = await this.createClaimTxs(Buffer.from(txoHash, "hex"), savedSwap, data.txId, data.vout, data.height, computedHeaderMap, feeData.initAta, feeData.feeRate);
+                    } else {
+                        console.log("[Watchtower.syncToTipHash] Claiming swap with txoHash: "+txoHash);
+                        claimTxs = await this.createClaimTxs(Buffer.from(txoHash, "hex"), savedSwap, data.txId, data.vout, data.height, computedHeaderMap);
+                    }
+
                     if(claimTxs==null)  {
                         await this.remove(savedSwap.txoHash);
                     } else {
@@ -374,7 +411,22 @@ export class Watchtower<T extends SwapData, B extends BtcStoredHeader<any>, TX> 
                         const unlock = savedSwap.lock(120);
                         if(unlock==null) continue;
 
-                        const claimTxs = await this.createClaimTxs(Buffer.from(txoHash, "hex"), savedSwap, data.txId, data.vout, data.height, computedHeaderMap);
+                        //Check claimer's bounty and create ATA if the claimer bounty covers the costs of it!
+
+                        let claimTxs: T["TX"][];
+                        if(this.shouldClaimCbk!=null) {
+                            const feeData = await this.shouldClaimCbk(savedSwap);
+                            if(feeData==null) {
+                                console.log("[Watchtower.syncToTipHash] Not claiming swap with txoHash: "+txoHash+" due to negative response from shouldClaimCbk() callback!");
+                                continue;
+                            }
+                            console.log("[Watchtower.syncToTipHash] Claiming swap with txoHash: "+txoHash+" initAta: "+feeData.initAta+" feeRate: "+feeData.feeRate);
+                            claimTxs = await this.createClaimTxs(Buffer.from(txoHash, "hex"), savedSwap, data.txId, data.vout, data.height, computedHeaderMap, feeData.initAta, feeData.feeRate);
+                        } else {
+                            console.log("[Watchtower.syncToTipHash] Claiming swap with txoHash: "+txoHash);
+                            claimTxs = await this.createClaimTxs(Buffer.from(txoHash, "hex"), savedSwap, data.txId, data.vout, data.height, computedHeaderMap);
+                        }
+
                         if(claimTxs==null) {
                             await this.remove(savedSwap.txoHash);
                         } else {
